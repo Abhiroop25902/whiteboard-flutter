@@ -6,6 +6,9 @@ void main() {
     title: 'Whiteboard',
     theme: ThemeData.light(),
     darkTheme: ThemeData.dark(),
-    home: const WhiteboardPage(),
+    initialRoute: '/',
+    routes: {
+      '/': (context) => const WhiteboardPage()
+    },
   ));
 }

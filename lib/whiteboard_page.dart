@@ -1,40 +1,57 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-class WhiteboardPage extends StatefulWidget {
+/// The Main Page (The Scaffold)
+class WhiteboardPage extends StatelessWidget {
   const WhiteboardPage({Key? key}) : super(key: key);
 
-  @override
-  State<WhiteboardPage> createState() => _WhiteboardPageState();
-}
-
-class _WhiteboardPageState extends State<WhiteboardPage> {
-  Color _strokeColor = Colors.green;
-
-  void updateStrokeColor(Color newStrokeColor) {
-    setState(() {
-      _strokeColor = newStrokeColor;
-    });
-  }
+  Widget _getConsumerColorIcon(Color iconColor) => Consumer<PaintConfig>(
+        builder: (context, selectedComponents, child) => IconButton(
+            onPressed: () => selectedComponents.changeColor(iconColor),
+            icon: Icon(
+              selectedComponents.strokeColor == iconColor
+                  ? Icons.circle_outlined
+                  : Icons.circle,
+              color: iconColor,
+            )),
+      );
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Whiteboard'),
-        actions: [
-          IconButton(
-              onPressed: () => updateStrokeColor(Colors.red),
-              icon: const Icon(
-                Icons.circle,
-                color: Colors.red,
-              )),
-        ],
+    const whiteBoard = WhiteBoard();
+
+    return ChangeNotifierProvider(
+      create: (context) => PaintConfig(),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Whiteboard'),
+          actions: [
+            _getConsumerColorIcon(Colors.red),
+            _getConsumerColorIcon(Colors.green),
+            _getConsumerColorIcon(Colors.blue),
+            Consumer<PaintConfig>(
+              builder: (context, selectedComponents, child) => Slider(
+                  min: selectedComponents.minStroke,
+                  max: selectedComponents.maxStroke,
+                  value: selectedComponents.strokeWidth,
+                  onChanged: (newStrokeWidth) =>
+                      selectedComponents.changeStrokeWidth(newStrokeWidth)),
+            ),
+            IconButton(
+                //TODO: better method needed, this resets the entire scaffold
+                onPressed: () {
+                  Navigator.popAndPushNamed(context, '/');
+                },
+                icon: const Icon(Icons.delete))
+          ],
+        ),
+        body: whiteBoard,
       ),
-      body: const WhiteBoard(),
     );
   }
 }
 
+/// The body of the WhiteBoardPage which contains the CustomPainter(uses Painter) and gestureDetector
 class WhiteBoard extends StatefulWidget {
   const WhiteBoard({Key? key}) : super(key: key);
 
@@ -43,59 +60,74 @@ class WhiteBoard extends StatefulWidget {
 }
 
 class _WhiteBoardState extends State<WhiteBoard> {
-  void showInfo(double dx, double dy) {
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text('dx: $dx dy: $dy')));
-  }
-
-  late final Painter kanjiPainter;
+  /// the painter object which will draw on the CustomPainter
+  late final Painter _painter;
 
   @override
   void initState() {
     super.initState();
-    kanjiPainter = Painter(Colors.black);
+    _painter = Painter();
   }
 
   @override
   Widget build(BuildContext context) {
+    /// CustomPaint also has a Listener<CustomPainter>
+    /// which allows CustomPainter to extend ChangeNotifier
     return CustomPaint(
-      //also has a listener
-      painter: kanjiPainter,
-      child: GestureDetector(
-        onPanStart: (dragStartDetails) {
-          kanjiPainter.startStroke(dragStartDetails.localPosition);
-        },
-        onPanUpdate: (dragUpdateDetails) {
-          kanjiPainter.appendStroke(dragUpdateDetails.localPosition);
-        },
-        onPanEnd: (dragEndDetails) {
-          kanjiPainter.endStroke();
-        },
+      painter: _painter,
+      child: Consumer<PaintConfig>(
+        builder: (context, paintConfig, child) => GestureDetector(
+          /// Pan gives us continuos feedback of where the users pointer is
+          /// touching using dragDetail.localPosition, we use this to draw
+          /// on that exact spot using the painter
+          ///
+          /// painter uses a List<Stroke> where a Stroke is the inputs from
+          /// a single Pan. A Stroke will have same color and width.
+          /// This color and width is taken from Consumer<PaintConfig>
+          ///
+          /// OnPanStart takes paintConfig to define a stroke with
+          /// required config
+          onPanStart: (dragStartDetails) {
+            _painter.startStroke(dragStartDetails.localPosition, paintConfig);
+          },
+
+          /// OnPanUpdate will add the new location of tap to existing Stroke
+          /// and hence does not need the paintConfig
+          onPanUpdate: (dragUpdateDetails) {
+            _painter.addToLastStroke(dragUpdateDetails.localPosition);
+          },
+        ),
       ),
     );
   }
 }
 
+/// The CustomPainter for the WhiteBoard
 class Painter extends ChangeNotifier implements CustomPainter {
-  Color strokeColor;
-  final List<Stroke> _strokes = [];
+  /// List of Strokes to draw on the WhiteBoard
+  final List<Stroke> _strokeList = [];
 
-  Painter(this.strokeColor);
+  // void clearPaint() {
+  //   for (var stroke in _strokes) {
+  //     stroke.clearStroke();
+  //   }
 
-  void startStroke(Offset position) {
+  //   _strokes.clear();
+  // }
+
+  /// Adds a new stroke to end of _strokeList with the given paintConfig
+  void startStroke(Offset position, PaintConfig paintConfig) {
     // print("startStroke");
-    _strokes.add(Stroke(strokeColor: Colors.red, strokeWidth: 2.5));
-    appendStroke(position);
+    _strokeList.add(Stroke(
+        strokeColor: paintConfig.strokeColor,
+        strokeWidth: paintConfig.strokeWidth));
+    addToLastStroke(position);
   }
 
-  void appendStroke(Offset position) {
-    // print("appendStroke");
-    _strokes.last.addPosition(position);
-    notifyListeners();
-  }
-
-  void endStroke() {
+  void addToLastStroke(Offset newPosition) {
+    // The existing Stroke will already be present in the last of _strokeList,
+    // we just add the newPosition to it
+    _strokeList.last.addPosition(newPosition);
     notifyListeners();
   }
 
@@ -108,30 +140,36 @@ class Painter extends ChangeNotifier implements CustomPainter {
           ..color = Colors.white
           ..style = PaintingStyle.fill);
 
-    for (var stroke in _strokes) {
+    // Draw the Strokes in the canvas
+    for (var stroke in _strokeList) {
       stroke.drawPosition(canvas);
     }
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    // No changes if this return true or false xdd
     return true;
   }
 
   @override
   bool? hitTest(Offset position) {
+    // No changes if this return true or false xdd
     return true;
   }
 
+  // No changes observed if given a not null object
   @override
   SemanticsBuilderCallback? get semanticsBuilder => null;
 
   @override
   bool shouldRebuildSemantics(covariant CustomPainter oldDelegate) {
+    // No changes if this return true or false xdd
     return true;
   }
 }
 
+/// Info of a single pan with given config
 class Stroke {
   final List<Offset> positions = [];
   final Color strokeColor;
@@ -142,8 +180,13 @@ class Stroke {
     required this.strokeWidth,
   });
 
+  // void clearStroke() {
+  //   positions.clear();
+  // }
+
   void addPosition(Offset position) => positions.add(position);
 
+  /// draws the stroke positions into the canvas
   void drawPosition(Canvas canvas) {
     var strokePaint = Paint()
       ..color = strokeColor
@@ -155,3 +198,28 @@ class Stroke {
     canvas.drawPath(strokePath, strokePaint);
   }
 }
+
+/// Paint Configuration which is accessed by the Painter and can be changes via actions in the Scaffold
+class PaintConfig extends ChangeNotifier {
+  Color strokeColor = Colors.red;
+  double strokeWidth = 2.5;
+  final double minStroke = 1;
+  final double maxStroke = 7;
+
+  void changeColor(Color newColor) {
+    if (newColor != strokeColor) {
+      strokeColor = newColor;
+      notifyListeners();
+    }
+  }
+
+  void changeStrokeWidth(double newStrokeWidth) {
+    if (strokeWidth != newStrokeWidth) {
+      strokeWidth = newStrokeWidth;
+      notifyListeners();
+    }
+  }
+}
+
+
+// extra TODO: an option for user selecting RGBA by their own for stroke color
